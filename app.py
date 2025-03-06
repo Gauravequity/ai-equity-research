@@ -4,10 +4,11 @@ import openai
 import whisper
 import requests
 import os
-import chromadb
+import faiss
+import numpy as np
 import time
 from dotenv import load_dotenv
-from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import FAISS
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from ratelimit import limits, sleep_and_retry
@@ -21,12 +22,11 @@ SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 # 🔹 Initialize OpenAI Client
 openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-# 🔹 Initialize ChromaDB for Document Search
-import chromadb
-
-chroma_client = chromadb.EphemeralClient()  # Use in-memory storage
+# 🔹 Initialize FAISS for Document Search
 embedding_function = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-collection = chroma_client.get_or_create_collection("research_docs")
+dimension = 1536  # OpenAI Embeddings output size
+index = faiss.IndexFlatL2(dimension)
+faiss_store = FAISS(embedding_function.embed_query, index)
 
 # 🔹 Streamlit UI Enhancements
 st.set_page_config(page_title="AI Equity Research", layout="wide")
@@ -80,19 +80,13 @@ if uploaded_files and "uploaded_files_processed" not in st.session_state:
                 pdf_reader = PdfReader(uploaded_file)
                 pdf_text = " ".join([page.extract_text() or "" for page in pdf_reader.pages])
 
-                # 🔹 Use OpenAI Embeddings for ChromaDB
+                # 🔹 Use OpenAI Embeddings for FAISS
                 text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
                 chunks = text_splitter.split_text(pdf_text)
 
                 # Batch Embedding for Faster Processing
                 embeddings = embedding_function.embed_documents(chunks)
-                for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-                    collection.add(
-                        ids=[f"{uploaded_file.name}_chunk_{i}"],
-                        metadatas=[{"filename": uploaded_file.name}],
-                        documents=[chunk],
-                        embeddings=[embedding]
-                    )
+                faiss_store.add_texts(chunks, metadatas=[{"filename": uploaded_file.name}])
 
             elif file_type in ["audio/mpeg", "audio/wav"]:
                 st.markdown(f"🎙️ **{uploaded_file.name}**")
@@ -106,18 +100,12 @@ if uploaded_files and "uploaded_files_processed" not in st.session_state:
                 result = model.transcribe(file_path)
                 transcript_text = result["text"]
 
-                # 🔹 Store Transcript in ChromaDB
+                # 🔹 Store Transcript in FAISS
                 text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
                 chunks = text_splitter.split_text(transcript_text)
 
                 embeddings = embedding_function.embed_documents(chunks)
-                for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-                    collection.add(
-                        ids=[f"{uploaded_file.name}_chunk_{i}"],
-                        metadatas=[{"filename": uploaded_file.name}],
-                        documents=[chunk],
-                        embeddings=[embedding]
-                    )
+                faiss_store.add_texts(chunks, metadatas=[{"filename": uploaded_file.name}])
 
                 os.remove(file_path)  # Cleanup
 
@@ -146,11 +134,11 @@ def stream_ai_response(prompt, model):
     )
     return response
 
-# 🔹 Process User Query with ChromaDB
+# 🔹 Process User Query with FAISS
 if user_input:
     with st.spinner("🔍 Searching documents..."):
-        search_results = collection.query(query_texts=[user_input], n_results=10)
-        matched_text = "\n\n".join(search_results["documents"][0]) if search_results["documents"] else "No relevant content found."
+        docs = faiss_store.similarity_search(user_input, k=10)
+        matched_text = "\n\n".join([doc.page_content for doc in docs]) if docs else "No relevant content found."
 
     # 🔹 AI Response
     st.subheader("🗨️ Chat Response")
