@@ -9,3 +9,5 @@ ratelimit
 chromadb
 duckdb
 uvicorn
+fastapi
+
