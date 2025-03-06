@@ -22,7 +22,9 @@ SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 # 🔹 Initialize ChromaDB for Document Search
-chroma_client = chromadb.PersistentClient(path="chroma_db")
+import chromadb
+
+chroma_client = chromadb.EphemeralClient()  # Use in-memory storage
 embedding_function = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
 collection = chroma_client.get_or_create_collection("research_docs")
 
