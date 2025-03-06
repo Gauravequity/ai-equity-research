@@ -3,7 +3,9 @@ openai
 PyPDF2
 whisper
 requests
-chromadb
 python-dotenv
 langchain-community
 ratelimit
+chromadb
+duckdb
+uvicorn
